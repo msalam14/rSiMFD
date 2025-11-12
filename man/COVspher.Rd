@@ -43,10 +43,10 @@ cov_val_seq <- sapply(h_val_seq, function(h) COVspher(h, Cov0, rng, ngt))
 plot(h_val_seq, cov_val_seq, type = "l", lwd = 2,
      xlab = "Distance h", ylab = "Spherical covariance",
      main = "Spherical covariance with nugget")
-abline(v = range, lty = 2)  # mark range
+abline(v = rng, lty = 2)  # mark range
 legend("topright",
-       legend = c(paste0("range = ", range),
-                  paste0("nugget = ", nugget),
+       legend = c(paste0("range = ", rng),
+                  paste0("nugget = ", ngt),
                   paste0("Cov0 = ", Cov0)),
        bty = "n")
 

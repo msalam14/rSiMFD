@@ -516,3 +516,288 @@ pred_dcompSiMVFD<-function(fitOBJ,testFDATA,test_indxJ,test_spat_indx){
 }
 
 
+#' Train a classifier based multivariate FPCA (separate basis) of spatially 
+#' indexed multivariate functional data
+#' 
+#' @param fDATA is a list of functional data, length is equal to the number of 
+#' function
+#' @param indxJ is a vector of length n that has elements represent m_i
+#' @param spat_indx is a L by 2 matrix contains spatial locations
+#' @param funARG is vector of sampled points where functional data were observed. 
+#' This can be generalized for sparse functional data. However this version 
+#' is only for
+#' dense functional data. Also all the functions are observed at identical 
+#' sampled point.
+#' @param PVE is a vector of length 2 for percentage of variation explained. 
+#' The first is used for fpca of each functional variable. The second is for 
+#' eigen decomposition of scores from each of the 
+#' @param corrM is a character specifies the name of spatial correlation
+#' @param center is a logical vector of length 1 indicates whether the 
+#' functional data need centering by the sample mean
+#' @param testFDATA is a list of functional data from the test for which we want 
+#' to obtain the projection onto the reduced dimension
+#' @param test_indxJ is similar to indxJ, however, it corresponds to the test 
+#' data provided
+#' @keywords internal
+#' @noRd
+#' @export
+MFPCA_HG_dcompSiMVFD<-function(fDATA,indxJ,spat_indx,funARG,PVE,corrM,
+                               center=FALSE,nknots=5,order_penalty=2,
+                               basisT=c("ps","ps"),sameEF="FALSE",
+                               testFDATA=NULL,test_indxJ=NULL, ...){
+  if(!is.null(testFDATA)&is.null(test_indxJ))
+    stop("For prediction test_indxJ is required")
+  n<-length(indxJ) 
+  p<-length(fDATA)
+  L<-nrow(spat_indx)
+  if(center){
+    fDATA<-lapply(fDATA, function(u){
+      scale(u,center = TRUE,scale = FALSE)
+    })
+  }
+  
+  # Dimension reduction
+  if(sameEF){
+    # multivariate functional principal component analysis
+    # Subject-patch specific basis
+    smth_cov<-smth_covar(funDATA=fDATA,
+                         funARG=funARG,
+                         pve=PVE[1],
+                         nKnot=nknots,
+                         basisT=basisT,
+                         tps_m=order_penalty)
+    
+    # Spectral decomposition of smooth covariance
+    Wmat<-diag(rep(1/sqrt(length(funARG)),2*length(funARG)))
+    IWmat<-diag(rep(sqrt(length(funARG)),length(funARG)))
+    spd_smth_covar<-eigen((Wmat%*%(smth_cov%*%Wmat)))
+    plamd<-spd_smth_covar$values[spd_smth_covar$values>0]
+    sp_nbasis<-which((cumsum(plamd)/sum(plamd))>PVE[2])[1]
+    sp_basis<-lapply(split.data.frame((spd_smth_covar$vectors[,1:sp_nbasis]),rep(1:p,each=length(funARG))),function(w){IWmat%*%w})
+    MfpcaSCR<-(do.call(cbind,fDATA)%*%do.call(rbind,sp_basis))*(1/length(funARG))
+    
+    ###### Estimation of Zeta
+    subID<-rep(1:n,indxJ*L)
+    subMEAN<-lapply(fDATA, function(u){
+      apply(u,2,function(v){
+        as.numeric(tapply(v,subID,mean))
+      })
+    })
+    Zeta<-Reduce(`+`,lapply(seq_len(length(fDATA)), function(u){
+      (subMEAN[[u]]%*%sp_basis[[u]])*(1/length(funARG))
+    }))
+    
+    sp_score<-as.data.frame(MfpcaSCR-apply(Zeta,2,function(w){rep(w,indxJ*L)}))
+    
+    sub_basisF<-sp_basis
+    # Test data subject-patch score
+    if(!is.null(testFDATA)){
+      if(center){
+        tFDATA<-lapply(seq_len(p), function(u){
+          testFDATA[[u]]-outer(rep(1,nrow(testFDATA[[u]])),colMeans(fDATA[[u]]))
+        })
+      } else{
+        tFDATA<-testFDATA
+      }
+      
+      ###### Estimation of Zeta for test data
+      tn<-length(test_indxJ)
+      tsubID<-rep(1:tn,test_indxJ*L)
+      tsubMEAN<-lapply(testFDATA, function(u){
+        apply(u,2,function(v){
+          as.numeric(tapply(v,tsubID,mean))
+        })
+      })
+      
+      Tscr<-Reduce(`+`,lapply(seq_len(p), function(u){
+        (tFDATA[[u]]%*%sp_basis[[u]])*(1/length(funARG))
+      }))
+      
+      tZeta<-Reduce(`+`,lapply(seq_len(p), function(u){
+        (tsubMEAN[[u]]%*%sp_basis[[u]])*(1/length(funARG))
+      }))
+      
+      tsp_score<-Tscr-apply(tZeta,2,function(w){rep(w,test_indxJ*L)})
+    }
+  } else{
+    # Subject effect: basis and scores
+    subID<-rep(1:n,indxJ*L)
+    subMEAN<-lapply(fDATA, function(u){
+      apply(u,2,function(v){
+        as.numeric(tapply(v,subID,mean))
+      })
+    })
+    
+    # Univariate fpca of subject-specific means
+    umFIT<-lapply(seq_len(length(subMEAN)), function(u){
+      fpca.sc(Y=subMEAN[[u]],argvals = funARG,pve = PVE[1])
+    })
+    
+    # estimation of univariate scores
+    uzeta_vec<-do.call(cbind,lapply(seq_len(length(subMEAN)),function(u){
+      (1/length(funARG))*((subMEAN[[u]]-outer(rep(1,n),umFIT[[u]]$mu))%*%umFIT[[u]]$efunctions)
+    }))
+    
+    spd_uzeta<-eigen(cov(uzeta_vec))
+    
+    npc_uz<-which((cumsum(spd_uzeta$values)/sum(spd_uzeta$values))>PVE[2])[1]
+    
+    CMat<-spd_uzeta$vectors[,1:npc_uz]
+    
+    # subject-effect eigen-function
+    sub_basisF<-split.data.frame(as.matrix(Matrix::bdiag(lapply(umFIT,function(u){u$efunctions}))%*%CMat),
+                                 rep(1:p,each=length(funARG)))
+    
+    # Subject-specific scores
+    Zeta<-Reduce(`+`,lapply(1:p,function(u){
+      (1/length(funARG))*((subMEAN[[u]]-outer(rep(1,n),umFIT[[u]]$mu))%*%sub_basisF[[u]])
+    }))
+    
+    # demeaned data
+    
+    dfDATA<-lapply(1:p, function(u){
+      fDATA[[u]]-outer(rep(1,length(subID)),umFIT[[u]]$mu)-(Zeta[subID,]%*%t(sub_basisF[[u]]))
+    })
+    
+    # Subject-patch specific basis
+    smth_cov<-smth_covar(funDATA=dfDATA,
+                         funARG=funARG,
+                         pve=PVE[1],
+                         nKnot=nknots,
+                         basisT=basisT,
+                         tps_m=order_penalty)
+    
+    # Spectral decomposition of smooth covariance
+    Wmat<-diag(rep(1/sqrt(length(funARG)),2*length(funARG)))
+    IWmat<-diag(rep(sqrt(length(funARG)),length(funARG)))
+    spd_smth_covar<-eigen((Wmat%*%(smth_cov%*%Wmat)))
+    plamd<-spd_smth_covar$values[spd_smth_covar$values>0]
+    sp_nbasis<-which((cumsum(plamd)/sum(plamd))>PVE[3])[1]
+    sp_basis<-lapply(split.data.frame((spd_smth_covar$vectors[,1:sp_nbasis]),rep(1:p,each=length(funARG))),function(w){IWmat%*%w})
+    sp_score<-(do.call(cbind,dfDATA)%*%do.call(rbind,sp_basis))*(1/length(funARG))
+    
+    # Test data subject-patch specific scores
+    if(!is.null(testFDATA)){
+      if(center){
+        tFDATA<-lapply(seq_len(p), function(u){
+          testFDATA[[u]]-outer(rep(1,nrow(testFDATA[[u]])),colMeans(fDATA[[u]]))
+        })
+      } else{
+        tFDATA<-testFDATA
+      }
+      ## Estimation of Zeta for test data
+      tn<-length(test_indxJ)
+      tsubID<-rep(1:tn,test_indxJ*L)
+      tsubMEAN<-lapply(testFDATA, function(u){
+        apply(u,2,function(v){
+          as.numeric(tapply(v,tsubID,mean))
+        })
+      })
+      
+      # Subject-specific scores for test data
+      tZeta<-Reduce(`+`,lapply(1:p,function(u){
+        (1/length(funARG))*((tsubMEAN[[u]]-outer(rep(1,tn),umFIT[[u]]$mu))%*%sub_basisF[[u]])
+      }))
+      
+      # demeaned data for test set
+      
+      tdfDATA<-lapply(1:p, function(u){
+        testFDATA[[u]]-outer(rep(1,length(tsubID)),umFIT[[u]]$mu)-(tZeta[tsubID,]%*%t(sub_basisF[[u]]))
+      })
+      
+      # subject-patch specific scores for test data
+      tsp_score<-(do.call(cbind,tdfDATA)%*%do.call(rbind,sp_basis))*(1/length(funARG))
+    }
+  }
+  
+  # Predictors for training data
+  mfpcaSCR<-as.data.frame(sp_score)
+  mfpcaSCR$Subject<-rep(1:n,indxJ*L)
+  mfpcaSCR$IndexJ<-as.factor(rep(1:sum(indxJ),each=L))
+  mfpcaSCR$Row<-rep(spat_indx[,1],times=sum(indxJ))
+  mfpcaSCR$Col<-rep(spat_indx[,2],times=sum(indxJ))
+  
+  spatFIT<-lapply(seq_len(ncol(sp_score)), function(u){
+    sdata<-as.data.frame(cbind("Y"=mfpcaSCR[,u],mfpcaSCR[,-c(1:ncol(sp_score))]))
+    lme(fixed=Y~1,data=sdata,random=~1|IndexJ,correlation = corSpatial(form=~Row+Col|IndexJ,nugget = TRUE,type = corrM), ...)
+  })
+  
+  rd_effect<-sapply(seq_len(length(spatFIT)), function(u){
+    vcv_wme<-simplify2array(getVarCov(spatFIT[[u]],type = "marginal"))[1:L,1:L,1]
+    gvcv<-MASS::ginv(vcv_wme)
+    sapply(split((sp_score[,u]-as.numeric(spatFIT[[u]]$coefficients$fixed)),rep(1:sum(indxJ),each=L)),function(w){
+      sum(gvcv%*%matrix(w,ncol=1))*as.numeric(simplify2array(getVarCov(spatFIT[[u]],type = "random.effects")))
+    })
+  })
+  
+  scMAT<-do.call(cbind,lapply(seq_len(length(spatFIT)), function(u){
+    cbind(rd_effect[,u],log(tapply(mfpcaSCR[,u]-as.numeric(spatFIT[[u]]$coefficients$fixed)-rep(rd_effect[,u],each=L),mfpcaSCR$IndexJ,var)))
+  }))
+  
+  
+  mfDATA<-if(center){
+    lapply(fDATA,colMeans)
+  } else{
+    NULL
+  }
+  
+  if(!is.null(testFDATA)){
+    ## Test random effects 
+    trd_effect<-sapply(seq_len(length(spatFIT)), function(u){
+      vcv_wme<-simplify2array(getVarCov(spatFIT[[u]],type = "marginal"))[1:L,1:L,1]
+      gvcv<-MASS::ginv(vcv_wme)
+      sapply(split((tsp_score[,u]-as.numeric(spatFIT[[u]]$coefficients$fixed)),rep(1:sum(test_indxJ),each=L)),function(w){
+        sum(gvcv%*%matrix(w,ncol=1))*as.numeric(simplify2array(getVarCov(spatFIT[[u]],type = "random.effects")))
+      })
+    })
+    
+    
+    tscMAT<-do.call(cbind,lapply(seq_len(length(spatFIT)), function(u){
+      cbind(trd_effect[,u],log(tapply(tsp_score[,u]-as.numeric(spatFIT[[u]]$coefficients$fixed)-rep(trd_effect[,u],each=L),rep(1:sum(test_indxJ),each=L),var)))
+    }))
+    
+    
+    retOBJ<-list(
+      "n" = n,
+      "p" = p,
+      "funARG" = funARG,
+      "L" = nrow(spat_indx),
+      "mFDATA"=mfDATA,
+      "SubEigenF"=sub_basisF,
+      "Zeta" = Zeta,
+      "EigenF"=sp_basis,
+      "XiS" = sp_score,
+      "spatCOV" = lapply(seq_len(length(spatFIT)),function(u){
+        simplify2array(getVarCov(spatFIT[[u]],type = "marginal"))[1:L,1:L,1]
+      }),
+      "REvar" = sapply(seq_len(length(spatFIT)),function(u){
+        as.numeric(simplify2array(getVarCov(spatFIT[[u]],type = "random.effects")))
+      }),
+      "trainRD" = scMAT,
+      "testRD" = tscMAT,
+      "TZeta" = tZeta
+    )
+  } else{
+    retOBJ<-list(
+      "n" = n,
+      "p" = p,
+      "funARG" = funARG,
+      "L" = nrow(spat_indx),
+      "mFDATA"=mfDATA,
+      "SubEigenF"=sub_basisF,
+      "Zeta" = Zeta,
+      "EigenF"=sp_basis,
+      "XiS" = sp_score,
+      "spatCOV" = lapply(seq_len(length(spatFIT)),function(u){
+        simplify2array(getVarCov(spatFIT[[u]],type = "marginal"))[1:L,1:L,1]
+      }),
+      "REvar" = sapply(seq_len(length(spatFIT)),function(u){
+        as.numeric(simplify2array(getVarCov(spatFIT[[u]],type = "random.effects")))
+      }),
+      "trainRD" = scMAT,
+      "testRD" = NULL,
+      "TZeta" = NULL
+    )
+  }
+  retOBJ
+}
