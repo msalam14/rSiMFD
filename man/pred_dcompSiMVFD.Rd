@@ -29,3 +29,75 @@ a list with following objects:
 \description{
 Give the projection on the reduced dimension obtained from RSIMVFD decomposition
 }
+\examples{
+# Load required package
+library(mvtnorm)
+
+# Example parameters
+n <- 25
+m_i <- rep(4, n)
+
+# Spatial index: 5x5 grid on [0,1]^2
+spat_indx <- as.matrix(expand.grid(seq(0, 1, length.out = 5),
+                                   seq(0, 1, length.out = 5)))
+
+# Functional argument (time points)
+funARG <- seq(0, 1, length.out = 20)
+
+# Mean function: p = 2 dimensional
+meanFUN <- function(t) {
+  c(sin(2 * pi * t), cos(2 * pi * t))
+}
+
+# Basis functions for p = 2
+basisFUN <- list(
+  function(t) cbind(sin(pi * t), cos(pi * t)),
+  function(t) cbind(sin(2 * pi * t), cos(2 * pi * t))
+)
+
+# Variance of zeta (2 components)
+zetaVAR <- c(1, 0.5)
+
+# Correlation functions for xi
+corrFUN <- list(
+  function(r) corSpatialVal(r,d=0.3,nugget = 0.15,type = "exponential"),      # exponential correlation
+  function(r) corSpatialVal(r,d=0.45,nugget = 0.05,type = "spherical") # slower decay
+)
+
+# Spatial variance and noise
+spatVAR <- c(1, 0.5)
+sigma2 <- 0.1
+
+# Generate data
+set.seed(123)
+sim_data <- rsimvFD(n, m_i, spat_indx, funARG,
+                    meanFUN, basisFUN, zetaVAR,
+                    corrFUN, spatVAR, sigma2)
+
+fit_rSiMVFD<-dcompSiMVFD(fDATA=sim_data$data,
+                         indxJ=m_i,
+                         spat_indx=spat_indx,
+                         funARG=funARG,
+                         PVE=c(0.95,0.95),
+                         corrM="spherical",
+                         sub_center=TRUE,
+                         nknots=5,
+                         order_penalty=2,
+                         basisT=c("ps","ps"),
+                         testFDATA=NULL,
+                         test_indxJ=NULL)
+
+# generation of a new data set for 10 subjects
+set.seed(143)
+test_sim_data <- rsimvFD(n=10, mi=rep(4, 10), spat_indx, funARG,
+                    meanFUN, basisFUN, zetaVAR,
+                    corrFUN, spatVAR, sigma2)
+
+pred_testD<-pred_dcompSiMVFD(fitOBJ=fit_rSiMVFD,
+                             testFDATA=test_sim_data$data,
+                             test_indxJ=rep(4,10),
+                             test_spat_indx=spat_indx)
+
+# Resulting features for test data
+head(pred_testD$testRD)
+}
