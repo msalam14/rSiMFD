@@ -4,7 +4,7 @@ Title: Multi-level functional model for rSiMFD
 Version: 0.1.0
 Depends: Matrix, rsvd, mvtnorm, sn, mgcv, refund, fda, fdapace, tidyverse
 Imports:
-    Matrix, mvtnorm, rsvd, matrixcalc, Rdpack, tidyverse
+    Matrix, mvtnorm, rsvd, matrixcalc, Rdpack, tidyverse, mvtnorm
 RdMacros: Rdpack
 Author: Samsul Alam
 Maintainer: The package maintainer <nojus14@gmail.com>
