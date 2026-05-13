@@ -442,7 +442,7 @@ dcompSiMVFD<-function(fDATA,indxJ,spat_indx,funARG,PVE,corrM,sub_center=TRUE,nkn
     }),
     "Sigma2" = as.numeric(tapply(us_var-diag(smth_cov),rep(1:2,each=length(funARG)),mean)),
     "trainRD" = scMAT,
-    "testXiS" = tsp_score,
+    "test_XiS" = tsp_score,
     "testRD" = tscMAT
   )
 }
@@ -511,6 +511,7 @@ pred_dcompSiMVFD<-function(fitOBJ,testFDATA,test_indxJ,test_spat_indx){
   }))
   list(
     "n" = length(test_indxJ),
+    "test_XiS" = tsp_score,
     "test_SRF" = tsREF,
     "test_factor_subtract" = tsDFACT,
     "testRD" = tscMAT
