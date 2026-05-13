@@ -416,6 +416,7 @@ dcompSiMVFD<-function(fDATA,indxJ,spat_indx,funARG,PVE,corrM,sub_center=TRUE,nkn
     }))
   } else{
     tscMAT<-NULL
+    tsp_score<-NULL
   }
   list(
     "n" = n,
@@ -441,6 +442,7 @@ dcompSiMVFD<-function(fDATA,indxJ,spat_indx,funARG,PVE,corrM,sub_center=TRUE,nkn
     }),
     "Sigma2" = as.numeric(tapply(us_var-diag(smth_cov),rep(1:2,each=length(funARG)),mean)),
     "trainRD" = scMAT,
+    "testXiS" = tsp_score,
     "testRD" = tscMAT
   )
 }
