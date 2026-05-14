@@ -1,7 +1,7 @@
 Package: rSiMFD
 Type: Package
 Title: Multi-level functional model for rSiMFD
-Version: 0.1.0
+Version: 0.1.1
 Depends: Matrix, rsvd, mvtnorm, sn, mgcv, refund, fda, fdapace, tidyverse
 Imports:
     Matrix, mvtnorm, rsvd, matrixcalc, Rdpack, tidyverse, mvtnorm
